@@ -188,6 +188,16 @@ If the user asks for anything in "Out of scope" above:
 
 ## Current status
 
-*Project not yet initialized. Next: scaffold Expo project, wire Supabase, install agents.*
+**Done (foundation only — no features yet):**
+- Expo + TypeScript + Expo Router scaffolded into the repo.
+- TypeScript strict mode enabled (`strict`, `noImplicitAny`, `noUncheckedIndexedAccess`).
+- Folder structure created: `/components`, `/lib`, `/stores`, `/types`, `/supabase/migrations`, `/supabase/functions/suggest-recipes`.
+- Dependencies installed: `@supabase/supabase-js`, `zustand`, `@react-native-async-storage/async-storage`. Dev: `jest`, `jest-expo`, `@testing-library/react-native`, `@testing-library/jest-native`, `@types/jest`, `react-test-renderer`.
+- Jest configured with `jest-expo` preset; `npm test` exits cleanly with no tests.
+- Supabase client at `/lib/supabase.ts` reads `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` from env; throws on missing values; uses AsyncStorage for session persistence.
+- `.env.example` committed; `.env` gitignored.
+- Initial SQL migration at `/supabase/migrations/0001_initial_schema.sql` for `profiles`, `pantry_items`, `ai_generations` with RLS, auto-`updated_at` trigger on `pantry_items`, auto-create-profile trigger on `auth.users`, and `(user_id, created_at)` index on `ai_generations`. **Not yet applied** — user runs in Supabase SQL editor.
+
+**Next:** create Supabase project, copy URL + anon key into local `.env`, run the migration, then build the email auth flow (sign-up / sign-in / sign-out) and onboarding screen.
 
 *Update this section as milestones complete.*
