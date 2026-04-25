@@ -108,6 +108,7 @@ SQL migrations are checked into `/supabase/migrations` as they're drafted.
 
 ## Code standards
 
+- **Always use `npx expo install <pkg>` instead of `npm install <pkg>` for any runtime dependency.** Expo's installer picks versions compatible with the project's Expo SDK. `npm install` directly will pull the latest npm version and break native modules. For dev-only dependencies (jest, types, lint plugins), check `npx expo install --check` after installing — if Expo flags a version mismatch, downgrade to the recommended version.
 - TypeScript strict. No `any`. No `@ts-ignore` without a comment explaining why.
 - Functional components. Hooks only.
 - Named exports for components (`export const Foo`). Default exports reserved for Expo Router route files.
