@@ -1,6 +1,7 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useAuthStore } from '@/stores/authStore';
 
@@ -56,22 +57,29 @@ export default function RootLayout() {
 
   if (!initialized) {
     return (
-      <View style={styles.loading} accessibilityLabel="Loading">
-        <ActivityIndicator />
-      </View>
+      <GestureHandlerRootView style={styles.root}>
+        <View style={styles.loading} accessibilityLabel="Loading">
+          <ActivityIndicator />
+        </View>
+      </GestureHandlerRootView>
     );
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="onboarding" />
-    </Stack>
+    <GestureHandlerRootView style={styles.root}>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="onboarding" />
+      </Stack>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   loading: {
     flex: 1,
     alignItems: 'center',
