@@ -7,6 +7,8 @@ import { useAuthStore } from '@/stores/authStore';
 export default function RootLayout() {
   const initialized = useAuthStore((state) => state.initialized);
   const session = useAuthStore((state) => state.session);
+  const profile = useAuthStore((state) => state.profile);
+  const profileLoaded = useAuthStore((state) => state.profileLoaded);
   const router = useRouter();
   const segments = useSegments();
   const initStartedRef = useRef(false);
@@ -24,13 +26,33 @@ export default function RootLayout() {
       return;
     }
     const inAuthGroup = segments[0] === '(auth)';
+    const onOnboarding = segments[0] === 'onboarding';
 
     if (!session && !inAuthGroup) {
       router.replace('/sign-in');
-    } else if (session && inAuthGroup) {
+      return;
+    }
+    if (session && !profileLoaded) {
+      // Wait until the profile finishes loading before deciding where to send
+      // a signed-in user — prevents a flash of /onboarding for returning users.
+      return;
+    }
+    if (
+      session &&
+      profile?.onboarding_complete === false &&
+      !onOnboarding
+    ) {
+      router.replace('/onboarding');
+      return;
+    }
+    if (
+      session &&
+      profile?.onboarding_complete !== false &&
+      (inAuthGroup || onOnboarding)
+    ) {
       router.replace('/');
     }
-  }, [initialized, session, segments, router]);
+  }, [initialized, session, profileLoaded, profile, segments, router]);
 
   if (!initialized) {
     return (
@@ -44,6 +66,7 @@ export default function RootLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="onboarding" />
     </Stack>
   );
 }
