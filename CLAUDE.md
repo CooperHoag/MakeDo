@@ -8,7 +8,7 @@
 
 ## The app
 
-MakeDo helps users live simply with what they already have. The philosophy is **make do, not consume more.** In Phase 1 the core loop is: pantry inventory → AI suggests recipes the user can cook tonight.
+MakeDo helps users live simply with what they already have. The philosophy is **make do, not consume more.** Phase 1 shipped the core loop: pantry inventory → AI suggests recipes the user can cook tonight.
 
 Tone: warm, encouraging, resourceful — never preachy, never judgmental.
 UI: clean, minimal, fast.
@@ -17,43 +17,43 @@ Platforms: iOS + Android (mobile-first).
 
 ---
 
-## Current phase: Phase 1 — Core Loop
+## Current phase: Phase 2 — scope TBD
 
-### In scope
-- Email sign-up / sign-in via Supabase Auth
-- Minimal onboarding: one screen explaining the "make do" thesis, then into the app
-- Pantry inventory CRUD — **name + quantity only**, no measurements, no categories, no expiration
-- AI recipe suggestion: "What can I make?" button → Edge Function → 3–5 recipe cards (name, ingredients used from pantry + ingredients still needed, basic steps)
-- Daily AI rate limit: **10 recipe generations per user per day**, enforced server-side
-- Cloud-first storage with local cache (Supabase as source of truth; Zustand + AsyncStorage for cache)
-- Sign out
+Phase 1 is complete. Phase 2 scope will be decided at kickoff, drawing from the candidate list below. **Do not implement Phase 2 features without an updated scope section in this file.**
 
-### Out of scope — do not build, do not suggest building
-- Meal categorization (breakfast / lunch / dinner / snacks / dessert)
-- Calorie estimates
-- Spicy/flirty narration mode
-- Grocery list
-- Receipt OCR (Google Vision)
-- Expiration dates + reminders
-- AI-photo inventory entry
-- Workouts, food log, habit tracking, streaks, money-saved, health recovery
-- Recipe favoriting, history, sharing
+### Phase 2 candidate features (in rough priority order, subject to user decision at kickoff)
+
+- Recipe persistence & favorites (server-side storage so recipes survive sign-out and sync across devices)
+- Pantry decrement after cooking (close the loop: cooking a recipe reduces pantry quantities)
+- Spicy/flirty narration mode for recipes
+- Grocery list (with pantry → grocery integration when items hit 0)
+- Calorie estimates and meal categorization (breakfast / lunch / dinner / snacks / dessert)
+- Receipt OCR for auto-populating pantry (Google Cloud Vision via Edge Function)
+- Expiration date tracking + reminders for perishables
+- AI-photo inventory entry (paid-tier feature)
+- Workouts module (goals, plans, injury accommodations, weight/time/distance logging)
+- Food log + AI recommendations integration
+- Habit tracking (streaks, milestones, money saved, sobriety/health recovery)
 - Push notifications
-- Payments / subscriptions
+- Payments / subscriptions (paid tier)
 
-If the user requests any of the above, the **clarifier** agent pauses and confirms: defer to Phase 2+, or expand Phase 1 now (and update this file first).
+### Out of scope for whatever Phase 2 turns out to be
+
+- Anything not in the agreed Phase 2 scope, even if listed above. The clarifier agent must pause if a request crosses scope.
+- Anthropic SDK as a dep (continue using `fetch` directly in Edge Functions).
+- Anything that would put a third-party API key in the client bundle.
 
 ---
 
 ## Tech stack (locked — do not substitute without explicit user approval)
 
-- **Framework:** React Native + Expo (managed workflow)
+- **Framework:** React Native + Expo (managed workflow), SDK 54
 - **Language:** TypeScript, strict mode, no `any`
 - **Navigation:** Expo Router (file-based)
 - **Backend:** Supabase (Postgres, Auth, Edge Functions, Storage)
-- **State:** Zustand with persist middleware + AsyncStorage
-- **AI / LLM:** routed through Supabase Edge Functions only — never from the client
-- **Image storage:** Supabase Storage (not used in Phase 1)
+- **State:** Zustand
+- **AI / LLM:** routed through Supabase Edge Functions only — never from the client. Current model: `claude-haiku-4-5-20251001` via Anthropic Messages API.
+- **Image storage:** Supabase Storage (not yet used)
 - **Testing:** Jest + React Native Testing Library, tests colocated with source
 - **Version control:** Git + GitHub
 
@@ -61,11 +61,12 @@ If the user requests any of the above, the **clarifier** agent pauses and confir
 
 ## Architecture principles
 
-- **Cloud-first, local-cache.** Supabase is source of truth. Zustand rehydrates from Supabase on launch; AsyncStorage caches for offline display.
+- **Cloud-first, local-cache.** Supabase is source of truth. Zustand rehydrates from Supabase on launch where applicable.
 - **Optimistic UI.** Local state updates immediately; write to Supabase in the background; visible rollback on failure.
 - **Edge Functions for all third-party APIs.** LLMs, OCR, any external service. No third-party SDKs in the mobile bundle except Supabase.
 - **Row Level Security (RLS) on every table.** Users can only read/write their own rows. No exceptions.
 - **Rate limiting is server-side.** Client-side caps are UX hints only. Enforcement lives in the Edge Function against the `ai_generations` table.
+- **Sign-out clears user-scoped Zustand state** (pantry, recipes, etc.). Privacy: no leaking between accounts on shared devices.
 
 ---
 
@@ -74,35 +75,45 @@ If the user requests any of the above, the **clarifier** agent pauses and confir
 ```
 /app                    # Expo Router routes
   /(auth)               # auth route group (sign-in, sign-up)
-  /(tabs)               # main tab group (post-auth)
+  /(tabs)               # main tab group (Pantry, Recipes)
+  onboarding.tsx        # one-time thesis screen
+  recipe-detail.tsx     # recipe step view
   _layout.tsx
 /components             # reusable UI components
 /lib                    # utilities, Supabase client, helpers
-/stores                 # Zustand stores
-/types                  # shared TypeScript types
+/stores                 # Zustand stores (authStore, pantryStore, recipeStore)
+/types                  # shared TypeScript types (profile, pantry, recipe)
 /supabase
   /migrations           # SQL migration files
-  /functions            # Edge Function code
-    /suggest-recipes
+  /functions
+    /suggest-recipes    # AI recipe Edge Function
 /.claude
   /agents               # dev.md, reviewer.md, clarifier.md, tester.md
-CLAUDE.md               # this file
+CLAUDE.md
 ```
 
 Test files live next to the code they test: `foo.test.ts` next to `foo.ts`.
 
 ---
 
-## Data model (Phase 1)
+## Data model (current)
 
-Four concepts, all with RLS enabled:
+All tables have RLS enabled, gated to `auth.uid() = user_id` (or `id` for profiles).
 
-- `profiles` — 1:1 with `auth.users`. Fields: `id`, `created_at`, `onboarding_complete`.
-- `pantry_items` — `id`, `user_id`, `name`, `quantity`, `created_at`, `updated_at`.
-- `ai_generations` — `id`, `user_id`, `feature`, `created_at`. Used for rate limiting.
-- Recipes themselves are **not persisted** in Phase 1. They're returned from the Edge Function and held in memory.
+- `profiles` — `id`, `created_at`, `onboarding_complete`. 1:1 with `auth.users` via the `handle_new_user` trigger.
+- `pantry_items` — `id`, `user_id`, `name`, `quantity`, `created_at`, `updated_at`. `user_id` defaults to `auth.uid()` (migration 0002).
+- `ai_generations` — `id`, `user_id`, `feature`, `created_at`. Used for daily rate limiting. `user_id` defaults to `auth.uid()`.
 
-SQL migrations are checked into `/supabase/migrations` as they're drafted.
+Recipes are NOT persisted (Phase 1 decision); they live in Zustand memory only.
+
+Migrations applied:
+- `0001_initial_schema.sql` — three tables + RLS + triggers.
+- `0002_user_id_defaults.sql` — `user_id` defaults to `auth.uid()` on `pantry_items` and `ai_generations`.
+
+**Convention for any new user-owned table:**
+- `user_id` column with `default auth.uid()`.
+- RLS policies for SELECT/INSERT/UPDATE/DELETE gated to `user_id = auth.uid()`.
+- Client code passes `user_id` explicitly on insert as belt-and-suspenders.
 
 ---
 
@@ -115,13 +126,13 @@ SQL migrations are checked into `/supabase/migrations` as they're drafted.
 - Every async call wrapped in try/catch with a user-visible error state. No silent failures.
 - Extract styles to StyleSheet when they exceed ~3 lines inline.
 - Every tappable element has an `accessibilityLabel`.
-- No `console.log` in merged code. Use a logger util.
+- No `console.log` in merged code. Use a logger util or `if (__DEV__) console.log(...)`.
 
 ---
 
 ## Security rules (hard lines)
 
-- **No API key (OpenAI, Anthropic, Google Cloud, Supabase service_role, etc.) goes in the mobile app, its .env, or its bundle.** The client sees only the Supabase anon key.
+- **No API key (OpenAI, Anthropic, Google Cloud, Supabase service_role, etc.) goes in the mobile app, its .env, or its bundle.** The client sees only the Supabase publishable key.
 - All third-party API keys live in Supabase Edge Function secrets (`supabase secrets set`).
 - If a user prompt or error paste contains what looks like an API key, do not echo it back — tell the user to regenerate it immediately.
 - RLS policies ship before the feature does. No open tables.
@@ -141,7 +152,7 @@ SQL migrations are checked into `/supabase/migrations` as they're drafted.
 ## Testing expectations
 
 - Every Zustand store: at least one test per exported action, covering success and failure paths.
-- Every Edge Function: happy path, rate-limit rejection, invalid input, unauthenticated.
+- Every Edge Function: covered by manual QA only (Deno + Jest is a rabbit hole — explicit Phase 1 decision, may revisit).
 - Every screen: one render test, one interaction test.
 - Mock Supabase and LLM calls — never hit real services from tests.
 - `npm test` must pass before handoff.
@@ -180,26 +191,39 @@ Flow: user prompt → clarifier (if ambiguous) → dev → tester → reviewer �
 
 ## Scope discipline
 
-If the user asks for anything in "Out of scope" above:
+If the user asks for anything not in the current phase's "In scope" list:
 1. The clarifier pauses.
-2. Asks: "This is a Phase 2+ feature. Expand Phase 1 now, or defer?"
+2. Asks: "This isn't in current scope. Expand the phase, defer, or rescope?"
 3. If expanding: user updates this file's phase section first, then the dev proceeds.
 4. Never silently implement out-of-scope work.
 
 ---
 
+## Carried-forward Phase 2 follow-ups (notes from Phase 1)
+
+- Recipe persistence + favorites (recipes currently in-memory only).
+- Server-side scrubbing of `ingredients_needed` against the allowlist (currently relies on the LLM following the prompt).
+- Unit-aware pantry tracking (would enable pantry decrement after cooking and remove "0.5 olive oil" ambiguity).
+- The pantry/recipe/auth Zustand stores have a bidirectional import for sign-out cleanup (lazy `getState()` only). If it ever causes runtime issues, refactor to a centralized `signOut.ts` orchestrator.
+- Two narrow type casts in `stores/authStore.ts` (`error as PostgrestError`, `data as Profile`) to clean up when generating Supabase DB types.
+- The `profile?.onboarding_complete !== false` check in `app/_layout.tsx` is fail-open — fine while column has `default false`, would need tightening if column ever became nullable.
+- Stepper double-tap race in pantry: rapid `+`/`−` taps fire writes from stale snapshots. Acceptable single-user behavior; debounce in Phase 2 if it bothers anyone.
+- `npm audit` reports moderate vulnerabilities in transitive dev dependencies. All non-runtime; worth a periodic look.
+
+---
+
 ## Current status
 
-**Done (foundation only — no features yet):**
-- Expo + TypeScript + Expo Router scaffolded into the repo.
-- TypeScript strict mode enabled (`strict`, `noImplicitAny`, `noUncheckedIndexedAccess`).
-- Folder structure created: `/components`, `/lib`, `/stores`, `/types`, `/supabase/migrations`, `/supabase/functions/suggest-recipes`.
-- Dependencies installed: `@supabase/supabase-js`, `zustand`, `@react-native-async-storage/async-storage`. Dev: `jest`, `jest-expo`, `@testing-library/react-native`, `@testing-library/jest-native`, `@types/jest`, `react-test-renderer`.
-- Jest configured with `jest-expo` preset; `npm test` exits cleanly with no tests.
-- Supabase client at `/lib/supabase.ts` reads `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` from env; throws on missing values; uses AsyncStorage for session persistence.
-- `.env.example` committed; `.env` gitignored.
-- Initial SQL migration at `/supabase/migrations/0001_initial_schema.sql` for `profiles`, `pantry_items`, `ai_generations` with RLS, auto-`updated_at` trigger on `pantry_items`, auto-create-profile trigger on `auth.users`, and `(user_id, created_at)` index on `ai_generations`. **Not yet applied** — user runs in Supabase SQL editor.
+**Phase 1 — COMPLETE.**
 
-**Next:** create Supabase project, copy URL + anon key into local `.env`, run the migration, then build the email auth flow (sign-up / sign-in / sign-out) and onboarding screen.
+Shipped:
+- Email auth (sign-up, sign-in, sign-out) with email confirmation via Supabase Auth.
+- Onboarding thesis screen, gated by `profiles.onboarding_complete`.
+- Pantry CRUD with optimistic local-cache + Supabase sync, swipe-to-delete, alphabetical sort, inline rename, quantity stepper.
+- AI recipe suggestion ("What can I make?" → Edge Function → Anthropic Claude Haiku 4.5 → 3-5 recipe cards). 10/day server-side rate limit. In-memory only.
+- Recipe detail screen with "From your pantry" / "You'll also need" / numbered steps.
+- Sign-out clears recipes and pantry from local state.
 
-*Update this section as milestones complete.*
+Test count: 79 tests across 9 suites, all passing. TypeScript strict, no `any`. `npx expo install --check` clean.
+
+**Next:** Phase 2 kickoff. Scope TBD with user.
