@@ -16,6 +16,7 @@ type PantryState = {
   incrementQuantity: (id: string) => Promise<void>;
   decrementQuantity: (id: string) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
+  clear: () => void;
 };
 
 const sortByName = (items: PantryItem[]): PantryItem[] =>
@@ -277,5 +278,9 @@ export const usePantryStore = create<PantryState>((set, get) => ({
         error: errorMessage(err, 'Could not delete item'),
       });
     }
+  },
+
+  clear: () => {
+    set({ items: [], loading: false, loaded: false, error: null });
   },
 }));

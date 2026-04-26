@@ -7,7 +7,14 @@ import {
 import { create } from 'zustand';
 
 import { supabase } from '@/lib/supabase';
+import { usePantryStore } from '@/stores/pantryStore';
+import { useRecipeStore } from '@/stores/recipeStore';
 import type { Profile } from '@/types/profile';
+
+const clearUserScopedState = (): void => {
+  useRecipeStore.getState().clearRecipes();
+  usePantryStore.getState().clear();
+};
 
 type SignResult = { error: AuthError | null };
 type CompleteOnboardingResult = { error: AuthError | PostgrestError | null };
@@ -99,6 +106,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
       if (event === 'SIGNED_OUT') {
         set({ profile: null, profileLoaded: true });
+        clearUserScopedState();
         return;
       }
       if (
@@ -140,6 +148,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: true });
     try {
       const { error } = await supabase.auth.signOut();
+      if (!error) {
+        clearUserScopedState();
+      }
       return { error };
     } catch (err) {
       return { error: toAuthError(err) };

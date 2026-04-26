@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,12 +15,15 @@ import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeabl
 
 import { useAuthStore } from '@/stores/authStore';
 import { usePantryStore } from '@/stores/pantryStore';
+import { useRecipeStore } from '@/stores/recipeStore';
 import type { PantryItem } from '@/types/pantry';
 
 export default function HomeScreen() {
   const items = usePantryStore((state) => state.items);
   const loaded = usePantryStore((state) => state.loaded);
   const error = usePantryStore((state) => state.error);
+  const recipeLoading = useRecipeStore((state) => state.loading);
+  const router = useRouter();
 
   const [draftName, setDraftName] = useState('');
   const [signOutLoading, setSignOutLoading] = useState(false);
@@ -56,6 +59,16 @@ export default function HomeScreen() {
   );
 
   const addDisabled = draftName.trim().length === 0;
+  const pantryEmpty = loaded && items.length === 0;
+  const suggestDisabled = pantryEmpty || recipeLoading;
+
+  const handleSuggestRecipes = async () => {
+    if (suggestDisabled) {
+      return;
+    }
+    await useRecipeStore.getState().fetchRecipes();
+    router.push('/recipes');
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -77,6 +90,26 @@ export default function HomeScreen() {
       <View style={styles.headerBlock}>
         <Text style={styles.heading}>Pantry</Text>
         <Text style={styles.subhead}>Add what you have. Edit any time.</Text>
+      </View>
+
+      <View style={styles.suggestRow}>
+        <Pressable
+          onPress={handleSuggestRecipes}
+          disabled={suggestDisabled}
+          accessibilityLabel="What can I make?"
+          accessibilityRole="button"
+          style={({ pressed }) => [
+            styles.suggestButton,
+            suggestDisabled && styles.suggestButtonDisabled,
+            pressed && !suggestDisabled && styles.suggestButtonPressed,
+          ]}
+        >
+          {recipeLoading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.suggestButtonText}>What can I make?</Text>
+          )}
+        </Pressable>
       </View>
 
       <View style={styles.addRow}>
@@ -327,6 +360,29 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 22,
     lineHeight: 24,
+    fontWeight: '600',
+  },
+  suggestRow: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  suggestButton: {
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: '#111',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suggestButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  suggestButtonPressed: {
+    opacity: 0.7,
+  },
+  suggestButtonText: {
+    color: '#fff',
+    fontSize: 16,
     fontWeight: '600',
   },
   errorBanner: {

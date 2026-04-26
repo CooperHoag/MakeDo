@@ -70,6 +70,21 @@ jest.mock('@/lib/supabase', () => ({
   },
 }));
 
+const mockClearRecipes = jest.fn();
+const mockClearPantry = jest.fn();
+
+jest.mock('@/stores/recipeStore', () => ({
+  useRecipeStore: {
+    getState: () => ({ clearRecipes: mockClearRecipes }),
+  },
+}));
+
+jest.mock('@/stores/pantryStore', () => ({
+  usePantryStore: {
+    getState: () => ({ clear: mockClearPantry }),
+  },
+}));
+
 const fakeUser = { id: 'user-1', email: 'test@example.com' } as unknown as User;
 const fakeSession = {
   access_token: 'token',
@@ -269,6 +284,26 @@ describe('authStore', () => {
       const result = await useAuthStore.getState().signOut();
 
       expect(result.error).toBe(authError);
+    });
+
+    it('clears recipe and pantry state on successful sign out', async () => {
+      mockSignOut.mockResolvedValueOnce({ error: null });
+
+      const useAuthStore = loadStore();
+      await useAuthStore.getState().signOut();
+
+      expect(mockClearRecipes).toHaveBeenCalledTimes(1);
+      expect(mockClearPantry).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT clear recipe and pantry state when sign out fails', async () => {
+      mockSignOut.mockResolvedValueOnce({ error: new AuthError('nope') });
+
+      const useAuthStore = loadStore();
+      await useAuthStore.getState().signOut();
+
+      expect(mockClearRecipes).not.toHaveBeenCalled();
+      expect(mockClearPantry).not.toHaveBeenCalled();
     });
   });
 

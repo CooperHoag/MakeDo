@@ -71,6 +71,7 @@ export default function RootLayout() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="onboarding" />
+        <Stack.Screen name="recipe-detail" options={{ headerShown: true }} />
       </Stack>
     </GestureHandlerRootView>
   );

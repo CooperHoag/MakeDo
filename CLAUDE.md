@@ -134,6 +134,7 @@ SQL migrations are checked into `/supabase/migrations` as they're drafted.
 - Cap is enforced in the Edge Function: count rows in `ai_generations` for this user for today before calling the LLM. At limit → return 429 with a friendly message.
 - Log every successful generation to `ai_generations`.
 - If the pantry is large, truncate or summarize before sending to the LLM. Never blindly dump the full list if it risks a runaway token bill.
+- **Phase 2 follow-up:** revisit the 10/day rate limit once we have real usage data. Consider making the cap configurable per user tier (free: 10/day; paid: 50+/day or unlimited).
 
 ---
 

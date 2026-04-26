@@ -68,11 +68,49 @@ jest.mock('@/stores/pantryStore', () => ({
   ),
 }));
 
+// ---- recipe store mock ------------------------------------------------------
+type RecipeActions = {
+  fetchRecipes: jest.Mock<Promise<void>, []>;
+  clearRecipes: jest.Mock<void, []>;
+};
+
+type RecipeState = RecipeActions & {
+  recipes: unknown[];
+  loading: boolean;
+  error: string | null;
+  lastFetchedAt: string | null;
+};
+
+const mockRecipeActions: RecipeActions = {
+  fetchRecipes: jest.fn<Promise<void>, []>(),
+  clearRecipes: jest.fn<void, []>(),
+};
+
+let mockRecipeState: RecipeState = {
+  recipes: [],
+  loading: false,
+  error: null,
+  lastFetchedAt: null,
+  ...mockRecipeActions,
+};
+
+jest.mock('@/stores/recipeStore', () => ({
+  useRecipeStore: Object.assign(
+    <T,>(selector: (state: RecipeState) => T): T => selector(mockRecipeState),
+    {
+      getState: (): RecipeState => mockRecipeState,
+    },
+  ),
+}));
+
 // ---- expo-router mock -------------------------------------------------------
+const mockPush = jest.fn();
+
 jest.mock('expo-router', () => ({
   useFocusEffect: (cb: () => void) => {
     cb();
   },
+  useRouter: () => ({ push: mockPush, replace: jest.fn(), back: jest.fn() }),
 }));
 
 // ---- react-native-gesture-handler/ReanimatedSwipeable mock ------------------
@@ -109,6 +147,13 @@ describe('HomeScreen (pantry)', () => {
       loading: false,
       error: null,
       ...mockPantryActions,
+    };
+    mockRecipeState = {
+      recipes: [],
+      loading: false,
+      error: null,
+      lastFetchedAt: null,
+      ...mockRecipeActions,
     };
   });
 
@@ -245,5 +290,51 @@ describe('HomeScreen (pantry)', () => {
     expect(screen.getByLabelText('Loading pantry')).toBeTruthy();
     // Empty-state copy must NOT be on screen during the initial load.
     expect(screen.queryByText('Your pantry is empty.')).toBeNull();
+  });
+
+  describe('"What can I make?" button', () => {
+    it('is disabled when the pantry is loaded and empty', () => {
+      setPantry({ items: [], loaded: true });
+      render(<HomeScreen />);
+      const btn = screen.getByLabelText('What can I make?');
+      expect(btn.props.accessibilityState?.disabled).toBe(true);
+    });
+
+    it('is disabled while the recipe store is loading', () => {
+      setPantry({ items: [item({ id: 'a', name: 'Apples' })] });
+      mockRecipeState = { ...mockRecipeState, loading: true };
+      render(<HomeScreen />);
+      const btn = screen.getByLabelText('What can I make?');
+      expect(btn.props.accessibilityState?.disabled).toBe(true);
+    });
+
+    it('calls fetchRecipes then navigates to /recipes when items exist', async () => {
+      setPantry({ items: [item({ id: 'a', name: 'Apples' })] });
+      mockRecipeActions.fetchRecipes.mockResolvedValueOnce(undefined);
+      render(<HomeScreen />);
+
+      const btn = screen.getByLabelText('What can I make?');
+      expect(btn.props.accessibilityState?.disabled).toBe(false);
+
+      await act(async () => {
+        fireEvent.press(btn);
+      });
+
+      expect(mockRecipeActions.fetchRecipes).toHaveBeenCalledTimes(1);
+      expect(mockPush).toHaveBeenCalledWith('/recipes');
+    });
+
+    it('does NOT navigate or fetch when pantry is empty (button disabled)', async () => {
+      setPantry({ items: [], loaded: true });
+      render(<HomeScreen />);
+
+      const btn = screen.getByLabelText('What can I make?');
+      await act(async () => {
+        fireEvent.press(btn);
+      });
+
+      expect(mockRecipeActions.fetchRecipes).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+    });
   });
 });
