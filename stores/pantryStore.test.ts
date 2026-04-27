@@ -87,7 +87,9 @@ const fakeItem = (overrides: Partial<PantryItem> = {}): PantryItem => ({
   id: 'real-1',
   user_id: 'user-1',
   name: 'Salt',
+  normalized_name: 'salt',
   quantity: 1,
+  unit: 'count',
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
   ...overrides,
@@ -179,18 +181,26 @@ describe('pantryStore', () => {
       mockSingle.mockReturnValueOnce(deferred);
 
       const useStore = loadStore();
-      const addPromise = useStore.getState().addItem('Onions');
+      const addPromise = useStore.getState().addItem('Onions', 'count');
 
       // Sync check: optimistic item should be in state immediately.
       const optimistic = useStore.getState().items;
       expect(optimistic).toHaveLength(1);
       expect(optimistic[0]?.name).toBe('Onions');
+      expect(optimistic[0]?.normalized_name).toBe('onions');
+      expect(optimistic[0]?.unit).toBe('count');
       expect(optimistic[0]?.id.startsWith('temp-')).toBe(true);
       expect(optimistic[0]?.quantity).toBe(1);
 
       // Resolve the supabase insert.
       resolveSingle({
-        data: fakeItem({ id: 'real-1', name: 'Onions', quantity: 1 }),
+        data: fakeItem({
+          id: 'real-1',
+          name: 'Onions',
+          normalized_name: 'onions',
+          quantity: 1,
+          unit: 'count',
+        }),
         error: null,
       });
       await addPromise;
@@ -200,14 +210,37 @@ describe('pantryStore', () => {
       expect(after.items[0]?.id).toBe('real-1');
       expect(after.error).toBeNull();
       expect(mockFrom).toHaveBeenCalledWith('pantry_items');
-      expect(mockInsert).toHaveBeenCalledWith({ name: 'Onions', user_id: 'user-1' });
+      expect(mockInsert).toHaveBeenCalledWith({
+        name: 'Onions',
+        normalized_name: 'onions',
+        unit: 'count',
+        user_id: 'user-1',
+      });
+    });
+
+    it('passes the chosen unit through to supabase', async () => {
+      mockSingle.mockResolvedValueOnce({
+        data: fakeItem({ id: 'real-1', name: 'Rice', normalized_name: 'rice', unit: 'cup' }),
+        error: null,
+      });
+
+      const useStore = loadStore();
+      await useStore.getState().addItem('Rice', 'cup');
+
+      expect(mockInsert).toHaveBeenCalledWith({
+        name: 'Rice',
+        normalized_name: 'rice',
+        unit: 'cup',
+        user_id: 'user-1',
+      });
+      expect(useStore.getState().items[0]?.unit).toBe('cup');
     });
 
     it('rolls back the optimistic item and surfaces error on failure', async () => {
       mockSingle.mockResolvedValueOnce({ data: null, error: pgError('insert failed') });
 
       const useStore = loadStore();
-      await useStore.getState().addItem('Onions');
+      await useStore.getState().addItem('Onions', 'count');
 
       const state = useStore.getState();
       expect(state.items).toEqual([]);
@@ -216,29 +249,34 @@ describe('pantryStore', () => {
 
     it('rejects empty / whitespace-only names without calling supabase', async () => {
       const useStore = loadStore();
-      await useStore.getState().addItem('   ');
+      await useStore.getState().addItem('   ', 'count');
 
       expect(mockInsert).not.toHaveBeenCalled();
       expect(useStore.getState().error).toBe('Item name cannot be empty.');
     });
 
-    it('trims the name before sending to supabase', async () => {
+    it('trims the name before sending to supabase and lowercases normalized_name', async () => {
       mockSingle.mockResolvedValueOnce({
-        data: fakeItem({ id: 'real-1', name: 'Onions' }),
+        data: fakeItem({ id: 'real-1', name: 'Onions', normalized_name: 'onions' }),
         error: null,
       });
 
       const useStore = loadStore();
-      await useStore.getState().addItem('  Onions  ');
+      await useStore.getState().addItem('  Onions  ', 'count');
 
-      expect(mockInsert).toHaveBeenCalledWith({ name: 'Onions', user_id: 'user-1' });
+      expect(mockInsert).toHaveBeenCalledWith({
+        name: 'Onions',
+        normalized_name: 'onions',
+        unit: 'count',
+        user_id: 'user-1',
+      });
     });
 
     it('returns early with error when no user is signed in (no supabase call, no optimistic item)', async () => {
       mockAuthState = { user: null };
 
       const useStore = loadStore();
-      await useStore.getState().addItem('Onions');
+      await useStore.getState().addItem('Onions', 'count');
 
       const state = useStore.getState();
       expect(state.items).toEqual([]);
@@ -257,8 +295,8 @@ describe('pantryStore', () => {
     };
 
     it('updates optimistically and re-sorts on rename success', async () => {
-      const apples = fakeItem({ id: 'a', name: 'Apples' });
-      const onions = fakeItem({ id: 'o', name: 'Onions' });
+      const apples = fakeItem({ id: 'a', name: 'Apples', normalized_name: 'apples' });
+      const onions = fakeItem({ id: 'o', name: 'Onions', normalized_name: 'onions' });
       const useStore = loadStore();
       seed(useStore, [apples, onions]);
 
@@ -268,8 +306,13 @@ describe('pantryStore', () => {
 
       const state = useStore.getState();
       expect(state.items.map((i) => i.name)).toEqual(['Onions', 'Zucchini']);
+      const renamed = state.items.find((i) => i.id === 'a');
+      expect(renamed?.normalized_name).toBe('zucchini');
       expect(state.error).toBeNull();
-      expect(mockUpdate).toHaveBeenCalledWith({ name: 'Zucchini' });
+      expect(mockUpdate).toHaveBeenCalledWith({
+        name: 'Zucchini',
+        normalized_name: 'zucchini',
+      });
       expect(mockEq).toHaveBeenCalledWith('id', 'a');
     });
 

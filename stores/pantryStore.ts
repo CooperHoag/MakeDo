@@ -3,7 +3,7 @@ import { create } from 'zustand';
 
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
-import type { PantryItem } from '@/types/pantry';
+import type { PantryItem, PantryUnit } from '@/types/pantry';
 
 type PantryState = {
   items: PantryItem[];
@@ -11,7 +11,7 @@ type PantryState = {
   loaded: boolean;
   error: string | null;
   loadItems: () => Promise<void>;
-  addItem: (name: string) => Promise<void>;
+  addItem: (name: string, unit: PantryUnit) => Promise<void>;
   updateName: (id: string, name: string) => Promise<void>;
   incrementQuantity: (id: string) => Promise<void>;
   decrementQuantity: (id: string) => Promise<void>;
@@ -23,6 +23,8 @@ const sortByName = (items: PantryItem[]): PantryItem[] =>
   [...items].sort((a, b) =>
     a.name.toLowerCase().localeCompare(b.name.toLowerCase()),
   );
+
+const normalize = (name: string): string => name.trim().toLowerCase();
 
 const errorMessage = (err: unknown, fallback = 'Something went wrong'): string => {
   if (err && typeof err === 'object' && 'message' in err) {
@@ -75,7 +77,7 @@ export const usePantryStore = create<PantryState>((set, get) => ({
     }
   },
 
-  addItem: async (rawName) => {
+  addItem: async (rawName, unit) => {
     set({ error: null });
     const name = rawName.trim();
     if (!name) {
@@ -89,13 +91,16 @@ export const usePantryStore = create<PantryState>((set, get) => ({
       return;
     }
 
+    const normalized = normalize(name);
     const tempId = nextTempId();
     const now = new Date().toISOString();
     const tempItem: PantryItem = {
       id: tempId,
       user_id: userId,
       name,
+      normalized_name: normalized,
       quantity: 1,
+      unit,
       created_at: now,
       updated_at: now,
     };
@@ -105,7 +110,12 @@ export const usePantryStore = create<PantryState>((set, get) => ({
     try {
       const { data, error } = await supabase
         .from('pantry_items')
-        .insert({ name, user_id: userId })
+        .insert({
+          name,
+          normalized_name: normalized,
+          unit,
+          user_id: userId,
+        })
         .select()
         .single();
       if (error || !data) {
@@ -145,22 +155,32 @@ export const usePantryStore = create<PantryState>((set, get) => ({
       return;
     }
 
+    const normalized = normalize(name);
+
     set({
       items: sortByName(
-        get().items.map((i) => (i.id === id ? { ...i, name } : i)),
+        get().items.map((i) =>
+          i.id === id ? { ...i, name, normalized_name: normalized } : i,
+        ),
       ),
     });
 
     try {
       const { error } = await supabase
         .from('pantry_items')
-        .update({ name })
+        .update({ name, normalized_name: normalized })
         .eq('id', id);
       if (error) {
         set({
           items: sortByName(
             get().items.map((i) =>
-              i.id === id ? { ...i, name: previous.name } : i,
+              i.id === id
+                ? {
+                    ...i,
+                    name: previous.name,
+                    normalized_name: previous.normalized_name,
+                  }
+                : i,
             ),
           ),
           error: errorMessage(error, 'Could not rename item'),
@@ -170,7 +190,13 @@ export const usePantryStore = create<PantryState>((set, get) => ({
       set({
         items: sortByName(
           get().items.map((i) =>
-            i.id === id ? { ...i, name: previous.name } : i,
+            i.id === id
+              ? {
+                  ...i,
+                  name: previous.name,
+                  normalized_name: previous.normalized_name,
+                }
+              : i,
           ),
         ),
         error: errorMessage(err, 'Could not rename item'),

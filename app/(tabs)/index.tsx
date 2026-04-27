@@ -41,7 +41,10 @@ export default function HomeScreen() {
       return;
     }
     setDraftName('');
-    await usePantryStore.getState().addItem(trimmed);
+    // TODO: Phase 2 task #3 — caller must pass the real unit picked in the
+    // redesigned add-item screen. The placeholder 'count' keeps the legacy
+    // single-input flow functional until then.
+    await usePantryStore.getState().addItem(trimmed, 'count');
   };
 
   const handleSignOut = async () => {

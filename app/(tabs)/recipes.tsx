@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 
 import { useRecipeStore } from '@/stores/recipeStore';
-import type { Recipe } from '@/types/recipe';
+import type { RecipeSuggestion } from '@/types/recipe';
 
 export default function RecipesScreen() {
   const recipes = useRecipeStore((state) => state.recipes);
@@ -30,7 +30,7 @@ export default function RecipesScreen() {
     });
   };
 
-  const renderItem: ListRenderItem<Recipe> = ({ item, index }) => (
+  const renderItem: ListRenderItem<RecipeSuggestion> = ({ item, index }) => (
     <Pressable
       onPress={() => handleOpenRecipe(index)}
       accessibilityLabel={`Recipe: ${item.name}`}

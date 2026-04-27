@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 
 import { supabase } from '@/lib/supabase';
-import type { Recipe } from '@/types/recipe';
+import type { RecipeSuggestion } from '@/types/recipe';
 
 type RecipeState = {
-  recipes: Recipe[];
+  recipes: RecipeSuggestion[];
   loading: boolean;
   error: string | null;
   lastFetchedAt: string | null;
@@ -63,7 +63,7 @@ export const useRecipeStore = create<RecipeState>((set) => ({
         return;
       }
       set({
-        recipes: recipes as Recipe[],
+        recipes: recipes as RecipeSuggestion[],
         lastFetchedAt: new Date().toISOString(),
         loading: false,
         error: null,

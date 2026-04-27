@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import React from 'react';
 
-import type { Recipe } from '@/types/recipe';
+import type { RecipeSuggestion } from '@/types/recipe';
 
 import RecipesScreen from './recipes';
 
@@ -11,7 +11,7 @@ type RecipeActions = {
 };
 
 type RecipeState = RecipeActions & {
-  recipes: Recipe[];
+  recipes: RecipeSuggestion[];
   loading: boolean;
   error: string | null;
   lastFetchedAt: string | null;
@@ -49,7 +49,7 @@ const setRecipeState = (overrides: Partial<RecipeState>) => {
   mockRecipeState = { ...mockRecipeState, ...overrides };
 };
 
-const fakeRecipe = (overrides: Partial<Recipe> = {}): Recipe => ({
+const fakeRecipe = (overrides: Partial<RecipeSuggestion> = {}): RecipeSuggestion => ({
   name: 'Garlic Pasta',
   description: 'A quick weeknight dinner.',
   ingredients_used: [{ name: 'Onions', quantity: 1 }],

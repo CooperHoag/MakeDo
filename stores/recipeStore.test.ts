@@ -1,4 +1,4 @@
-import type { Recipe } from '@/types/recipe';
+import type { RecipeSuggestion } from '@/types/recipe';
 
 type InvokeResult = { data: unknown; error: unknown };
 
@@ -25,7 +25,7 @@ const loadStore = (): typeof import('./recipeStore').useRecipeStore => {
   return store;
 };
 
-const fakeRecipe = (overrides: Partial<Recipe> = {}): Recipe => ({
+const fakeRecipe = (overrides: Partial<RecipeSuggestion> = {}): RecipeSuggestion => ({
   name: 'Garlic Onion Pasta',
   description: 'Quick weeknight pasta with what you have.',
   ingredients_used: [{ name: 'Onions', quantity: 1 }],

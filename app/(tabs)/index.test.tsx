@@ -14,7 +14,7 @@ type AuthState = {
 
 type PantryActions = {
   loadItems: jest.Mock<Promise<void>, []>;
-  addItem: jest.Mock<Promise<void>, [string]>;
+  addItem: jest.Mock<Promise<void>, [string, string]>;
   updateName: jest.Mock<Promise<void>, [string, string]>;
   incrementQuantity: jest.Mock<Promise<void>, [string]>;
   decrementQuantity: jest.Mock<Promise<void>, [string]>;
@@ -44,7 +44,7 @@ jest.mock('@/stores/authStore', () => ({
 // ---- pantry mock ------------------------------------------------------------
 const mockPantryActions: PantryActions = {
   loadItems: jest.fn<Promise<void>, []>(),
-  addItem: jest.fn<Promise<void>, [string]>(),
+  addItem: jest.fn<Promise<void>, [string, string]>(),
   updateName: jest.fn<Promise<void>, [string, string]>(),
   incrementQuantity: jest.fn<Promise<void>, [string]>(),
   decrementQuantity: jest.fn<Promise<void>, [string]>(),
@@ -127,7 +127,9 @@ const item = (overrides: Partial<PantryItem> = {}): PantryItem => ({
   id: 'i-1',
   user_id: 'user-1',
   name: 'Apples',
+  normalized_name: 'apples',
   quantity: 1,
+  unit: 'count',
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
   ...overrides,
@@ -183,7 +185,7 @@ describe('HomeScreen (pantry)', () => {
       fireEvent.press(addButton);
     });
 
-    expect(mockPantryActions.addItem).toHaveBeenCalledWith('Onions');
+    expect(mockPantryActions.addItem).toHaveBeenCalledWith('Onions', 'count');
     expect(input.props.value).toBe('');
   });
 
