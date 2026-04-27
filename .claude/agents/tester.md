@@ -13,7 +13,7 @@ You write the tests the dev didn't, and you run all tests to confirm nothing is 
 2. Read the dev's changed files and handoff summary.
 3. Identify what's untested.
 
-## Coverage expectations (Phase 1)
+## Coverage expectations
 
 ### Zustand stores
 - At least one test per exported action.
