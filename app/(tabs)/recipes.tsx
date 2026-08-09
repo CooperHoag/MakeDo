@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 
 import { useRecipeStore } from '@/stores/recipeStore';
-import type { RecipeSuggestion } from '@/types/recipe';
+import type { Recipe } from '@/types/recipe';
 
 export default function RecipesScreen() {
   const recipes = useRecipeStore((state) => state.recipes);
@@ -20,7 +20,9 @@ export default function RecipesScreen() {
   const router = useRouter();
 
   const handleRetry = () => {
-    void useRecipeStore.getState().fetchRecipes();
+    // TODO: Phase 2 task #4 — replace hardcoded 'dinner' with the category
+    // currently in scope on the Recipes tab session.
+    void useRecipeStore.getState().fetchRecipes('dinner');
   };
 
   const handleOpenRecipe = (index: number) => {
@@ -30,24 +32,33 @@ export default function RecipesScreen() {
     });
   };
 
-  const renderItem: ListRenderItem<RecipeSuggestion> = ({ item, index }) => (
-    <Pressable
-      onPress={() => handleOpenRecipe(index)}
-      accessibilityLabel={`Recipe: ${item.name}`}
-      accessibilityRole="button"
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-    >
-      <Text style={styles.cardTitle} numberOfLines={2}>
-        {item.name}
-      </Text>
-      <Text style={styles.cardDesc} numberOfLines={2}>
-        {item.description}
-      </Text>
-      <Text style={styles.cardFooter}>
-        {`${item.ingredients_used.length} from your pantry · ${item.ingredients_needed.length} to grab · ~${item.estimated_minutes} min`}
-      </Text>
-    </Pressable>
-  );
+  const renderItem: ListRenderItem<Recipe> = ({ item, index }) => {
+    const minutes = item.estimated_minutes;
+    const footerParts = [
+      `${item.ingredients.length} ingredient${item.ingredients.length === 1 ? '' : 's'}`,
+    ];
+    if (typeof minutes === 'number') {
+      footerParts.push(`~${minutes} min`);
+    }
+    return (
+      <Pressable
+        onPress={() => handleOpenRecipe(index)}
+        accessibilityLabel={`Recipe: ${item.name}`}
+        accessibilityRole="button"
+        style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      >
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {item.name}
+        </Text>
+        {item.description ? (
+          <Text style={styles.cardDesc} numberOfLines={2}>
+            {item.description}
+          </Text>
+        ) : null}
+        <Text style={styles.cardFooter}>{footerParts.join(' · ')}</Text>
+      </Pressable>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -89,7 +100,7 @@ export default function RecipesScreen() {
       ) : (
         <FlatList
           data={recipes}
-          keyExtractor={(_, index) => String(index)}
+          keyExtractor={(item) => item.id}
           renderItem={renderItem}
           ItemSeparatorComponent={Separator}
           contentContainerStyle={styles.listContent}

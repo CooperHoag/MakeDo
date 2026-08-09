@@ -69,7 +69,9 @@ export default function HomeScreen() {
     if (suggestDisabled) {
       return;
     }
-    await useRecipeStore.getState().fetchRecipes();
+    // TODO: Phase 2 task #4 — replace hardcoded 'dinner' with the user's
+    // picked category from the category picker modal on the Pantry CTA.
+    await useRecipeStore.getState().fetchRecipes('dinner');
     router.push('/recipes');
   };
 

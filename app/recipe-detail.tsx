@@ -9,6 +9,15 @@ import {
 } from 'react-native';
 
 import { useRecipeStore } from '@/stores/recipeStore';
+import type { RecipeIngredient } from '@/types/recipe';
+
+const formatIngredient = (ingredient: RecipeIngredient): string => {
+  const qty = ingredient.quantity;
+  if (ingredient.unit === null) {
+    return `${qty} ${ingredient.name}`;
+  }
+  return `${qty} ${ingredient.unit} ${ingredient.name}`;
+};
 
 export default function RecipeDetailScreen() {
   const { recipeIndex } = useLocalSearchParams<{ recipeIndex: string }>();
@@ -51,25 +60,16 @@ export default function RecipeDetailScreen() {
       <Stack.Screen options={{ headerShown: true, title: recipe.name }} />
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.title}>{recipe.name}</Text>
-        <Text style={styles.description}>{recipe.description}</Text>
-
-        {recipe.ingredients_used.length > 0 ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>From your pantry</Text>
-            {recipe.ingredients_used.map((u, i) => (
-              <Text key={`used-${i}`} style={styles.listItem}>
-                {u.name}
-              </Text>
-            ))}
-          </View>
+        {recipe.description ? (
+          <Text style={styles.description}>{recipe.description}</Text>
         ) : null}
 
-        {recipe.ingredients_needed.length > 0 ? (
+        {recipe.ingredients.length > 0 ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>You'll also need</Text>
-            {recipe.ingredients_needed.map((n, i) => (
-              <Text key={`need-${i}`} style={styles.listItem}>
-                {n}
+            <Text style={styles.sectionTitle}>Ingredients</Text>
+            {recipe.ingredients.map((ing, i) => (
+              <Text key={`ing-${i}`} style={styles.listItem}>
+                {formatIngredient(ing)}
               </Text>
             ))}
           </View>
@@ -87,7 +87,9 @@ export default function RecipeDetailScreen() {
           </View>
         ) : null}
 
-        <Text style={styles.footer}>{`~${recipe.estimated_minutes} minutes`}</Text>
+        {typeof recipe.estimated_minutes === 'number' ? (
+          <Text style={styles.footer}>{`~${recipe.estimated_minutes} minutes`}</Text>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

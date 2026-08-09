@@ -1,14 +1,14 @@
 import { create } from 'zustand';
 
 import { supabase } from '@/lib/supabase';
-import type { RecipeSuggestion } from '@/types/recipe';
+import type { Recipe, RecipeCategory } from '@/types/recipe';
 
 type RecipeState = {
-  recipes: RecipeSuggestion[];
+  recipes: Recipe[];
   loading: boolean;
   error: string | null;
   lastFetchedAt: string | null;
-  fetchRecipes: () => Promise<void>;
+  fetchRecipes: (category: RecipeCategory) => Promise<void>;
   clearRecipes: () => void;
 };
 
@@ -49,10 +49,13 @@ export const useRecipeStore = create<RecipeState>((set) => ({
   error: null,
   lastFetchedAt: null,
 
-  fetchRecipes: async () => {
+  fetchRecipes: async (category) => {
     set({ loading: true, error: null });
     try {
-      const { data, error } = await supabase.functions.invoke('suggest-recipes');
+      const { data, error } = await supabase.functions.invoke(
+        'suggest-recipes',
+        { body: { category } },
+      );
       if (error) {
         set({ loading: false, error: extractErrorMessage(error, data) });
         return;
@@ -63,7 +66,7 @@ export const useRecipeStore = create<RecipeState>((set) => ({
         return;
       }
       set({
-        recipes: recipes as RecipeSuggestion[],
+        recipes: recipes as Recipe[],
         lastFetchedAt: new Date().toISOString(),
         loading: false,
         error: null,

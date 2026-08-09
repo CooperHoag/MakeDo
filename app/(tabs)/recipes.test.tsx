@@ -1,24 +1,24 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import React from 'react';
 
-import type { RecipeSuggestion } from '@/types/recipe';
+import type { Recipe, RecipeCategory } from '@/types/recipe';
 
 import RecipesScreen from './recipes';
 
 type RecipeActions = {
-  fetchRecipes: jest.Mock<Promise<void>, []>;
+  fetchRecipes: jest.Mock<Promise<void>, [RecipeCategory]>;
   clearRecipes: jest.Mock<void, []>;
 };
 
 type RecipeState = RecipeActions & {
-  recipes: RecipeSuggestion[];
+  recipes: Recipe[];
   loading: boolean;
   error: string | null;
   lastFetchedAt: string | null;
 };
 
 const mockRecipeActions: RecipeActions = {
-  fetchRecipes: jest.fn<Promise<void>, []>(),
+  fetchRecipes: jest.fn<Promise<void>, [RecipeCategory]>(),
   clearRecipes: jest.fn<void, []>(),
 };
 
@@ -49,13 +49,18 @@ const setRecipeState = (overrides: Partial<RecipeState>) => {
   mockRecipeState = { ...mockRecipeState, ...overrides };
 };
 
-const fakeRecipe = (overrides: Partial<RecipeSuggestion> = {}): RecipeSuggestion => ({
+const fakeRecipe = (overrides: Partial<Recipe> = {}): Recipe => ({
+  id: 'r-1',
+  user_id: 'user-1',
   name: 'Garlic Pasta',
   description: 'A quick weeknight dinner.',
-  ingredients_used: [{ name: 'Onions', quantity: 1 }],
-  ingredients_needed: ['Olive oil'],
+  category: 'dinner',
+  ingredients: [{ name: 'Onions', quantity: 1, unit: 'count' }],
   steps: ['Boil pasta.', 'Sauté onion.', 'Combine.'],
   estimated_minutes: 20,
+  is_favorite: false,
+  created_at: '2026-01-01T00:00:00.000Z',
+  expires_at: '2026-01-15T00:00:00.000Z',
   ...overrides,
 });
 
@@ -100,12 +105,13 @@ describe('RecipesScreen', () => {
     });
 
     expect(mockRecipeActions.fetchRecipes).toHaveBeenCalledTimes(1);
+    expect(mockRecipeActions.fetchRecipes).toHaveBeenCalledWith('dinner');
   });
 
   it('renders a list of recipe cards when loaded', () => {
     const recipes = [
-      fakeRecipe({ name: 'Garlic Pasta' }),
-      fakeRecipe({ name: 'Onion Soup' }),
+      fakeRecipe({ id: 'a', name: 'Garlic Pasta' }),
+      fakeRecipe({ id: 'b', name: 'Onion Soup' }),
     ];
     setRecipeState({ recipes });
     render(<RecipesScreen />);
@@ -116,8 +122,8 @@ describe('RecipesScreen', () => {
 
   it('navigates to the detail screen with the right recipeIndex on card press', async () => {
     const recipes = [
-      fakeRecipe({ name: 'Garlic Pasta' }),
-      fakeRecipe({ name: 'Onion Soup' }),
+      fakeRecipe({ id: 'a', name: 'Garlic Pasta' }),
+      fakeRecipe({ id: 'b', name: 'Onion Soup' }),
     ];
     setRecipeState({ recipes });
     render(<RecipesScreen />);

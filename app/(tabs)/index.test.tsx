@@ -69,8 +69,14 @@ jest.mock('@/stores/pantryStore', () => ({
 }));
 
 // ---- recipe store mock ------------------------------------------------------
+type RecipeCategoryString =
+  | 'breakfast'
+  | 'lunch'
+  | 'dinner'
+  | 'dessert'
+  | 'snack';
 type RecipeActions = {
-  fetchRecipes: jest.Mock<Promise<void>, []>;
+  fetchRecipes: jest.Mock<Promise<void>, [RecipeCategoryString]>;
   clearRecipes: jest.Mock<void, []>;
 };
 
@@ -82,7 +88,7 @@ type RecipeState = RecipeActions & {
 };
 
 const mockRecipeActions: RecipeActions = {
-  fetchRecipes: jest.fn<Promise<void>, []>(),
+  fetchRecipes: jest.fn<Promise<void>, [RecipeCategoryString]>(),
   clearRecipes: jest.fn<void, []>(),
 };
 
@@ -323,6 +329,7 @@ describe('HomeScreen (pantry)', () => {
       });
 
       expect(mockRecipeActions.fetchRecipes).toHaveBeenCalledTimes(1);
+      expect(mockRecipeActions.fetchRecipes).toHaveBeenCalledWith('dinner');
       expect(mockPush).toHaveBeenCalledWith('/recipes');
     });
 

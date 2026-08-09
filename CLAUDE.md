@@ -52,7 +52,7 @@ Platforms: iOS + Android (mobile-first).
    - Items in pantry that hit 0 stay visible at quantity 0 (existing Phase 1 behavior — swipe-to-delete still removes them).
 
 8. **AI Edge Function rewrite (`suggest-recipes`).**
-   - Pantry-only generation. The AI is restricted to the user's pantry items + a fixed assumed-staples list (salt, pepper, water, neutral cooking oil, common dried spices: garlic powder, onion powder, paprika, chili flakes, dried herbs). Anything else must be in the pantry.
+   - Pantry-only generation. The AI is restricted to the user's pantry items + a fixed assumed-staples list (Salt, Black pepper, Water, Neutral cooking oil, Garlic powder, Onion powder, Paprika, Chili flakes, Dried oregano, Dried basil, Dried thyme, Bay leaves). Anything else must be in the pantry.
    - Output is exactly 4 recipes per call (was 3–5 in Phase 1).
    - Category is an input parameter; AI emits the same category back on each recipe.
    - Ingredient output is structured: `[{name, quantity, unit}, ...]` — no more natural-language ingredient strings.
@@ -243,6 +243,7 @@ Phase 2 migrations (to be added in order):
 - Sparse-pantry guard: client-side disable of the generate CTA when pantry has < 5 items (UX only, no server enforcement needed since AI won't be called).
 - **Phase 2 follow-up:** revisit the 10/day rate limit once we have real usage data. Consider making the cap configurable per user tier (free: 10/day; paid: 50+/day or unlimited).
 - **No "X generations left today" UI hint.** Counting credits is anti-MakeDo. The friendly 429 message handles the cap case.
+- **Assumed-staples list (locked, Phase 2):** the only ingredients a recipe may reference outside the user's pantry are these 12 items, matched case-insensitively and trimmed: Salt, Black pepper, Water, Neutral cooking oil, Garlic powder, Onion powder, Paprika, Chili flakes, Dried oregano, Dried basil, Dried thyme, Bay leaves. The Edge Function scrubs every emitted ingredient against this list plus `pantry_items.normalized_name`; non-matching ingredients drop the recipe. Keep this list in sync with `ASSUMED_STAPLES` in `supabase/functions/suggest-recipes/index.ts`.
 
 ---
 
@@ -311,7 +312,7 @@ Five Claude Code prompts, run in order. Each one ships and tests before the next
 
 ## Carried-forward Phase 2 follow-ups (notes from Phase 1, still relevant)
 
-- Server-side scrubbing of recipe ingredients against the allowlist (currently relies on the LLM following the prompt). Phase 2's pantry-only constraint reinforces this need — worth a server-side check that every emitted ingredient name resolves to either a pantry row or the assumed-staples list.
+- ~~Server-side scrubbing of recipe ingredients against the allowlist~~ — done in Phase 2 task #2: every emitted ingredient name is matched (case-insensitive, trimmed, strict equality) against `pantry_items.normalized_name` or the locked `ASSUMED_STAPLES` list. Non-matching recipes are dropped before persistence.
 - The pantry/recipe/auth Zustand stores have a bidirectional import for sign-out cleanup (lazy `getState()` only). If it ever causes runtime issues, refactor to a centralized `signOut.ts` orchestrator.
 - Two narrow type casts in `stores/authStore.ts` (`error as PostgrestError`, `data as Profile`) to clean up when generating Supabase DB types.
 - The `profile?.onboarding_complete !== false` check in `app/_layout.tsx` is fail-open — fine while column has `default false`, would need tightening if column ever became nullable.

@@ -1,9 +1,10 @@
 // MakeDo: suggest-recipes Edge Function (Deno).
 //
-// Reads the caller's pantry (via RLS-scoped Supabase client), enforces a
-// per-user daily rate limit on `ai_generations`, calls Anthropic Claude
-// Haiku 4.5 for recipe suggestions, logs the generation, and returns a
-// validated `{ recipes: Recipe[] }` payload.
+// Phase 2 rewrite. Reads the caller's pantry (via RLS-scoped Supabase
+// client), enforces a per-user daily rate limit on `ai_generations`, calls
+// Anthropic Claude Haiku 4.5 for category-targeted recipe suggestions,
+// validates and scrubs the response, persists exactly 4 recipes to the
+// `recipes` table, logs the generation, and returns the inserted rows.
 //
 // Secrets required (set via `supabase secrets set`):
 //   ANTHROPIC_API_KEY       (server-only, never bundled with the client)
@@ -24,6 +25,51 @@ declare const Deno: {
 const DAILY_LIMIT = 10;
 const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
+const RECIPES_PER_GENERATION = 4;
+const INSERT_RETRY_DELAY_MS = 250;
+const MIN_PANTRY_ITEMS = 5;
+
+const RECIPE_CATEGORIES = [
+  'breakfast',
+  'lunch',
+  'dinner',
+  'dessert',
+  'snack',
+] as const;
+type RecipeCategory = (typeof RECIPE_CATEGORIES)[number];
+
+const PANTRY_UNITS = [
+  'count',
+  'oz',
+  'lb',
+  'g',
+  'kg',
+  'fl_oz',
+  'cup',
+  'tbsp',
+  'tsp',
+  'ml',
+  'L',
+] as const;
+type PantryUnit = (typeof PANTRY_UNITS)[number];
+
+// Locked Phase 2 staples list. Names are matched case-insensitively, trimmed,
+// against ingredient names emitted by the LLM. Keep in sync with CLAUDE.md
+// §AI / cost management.
+const ASSUMED_STAPLES = [
+  'Salt',
+  'Black pepper',
+  'Water',
+  'Neutral cooking oil',
+  'Garlic powder',
+  'Onion powder',
+  'Paprika',
+  'Chili flakes',
+  'Dried oregano',
+  'Dried basil',
+  'Dried thyme',
+  'Bay leaves',
+] as const;
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -32,7 +78,19 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const SYSTEM_PROMPT = `You are MakeDo's recipe assistant. The user has a pantry of items. Suggest 3-5 simple, achievable recipes they could make with what they have, allowing for small additions of common pantry staples (oil, salt, pepper, water) that you can list as "needed" if missing.
+const SYSTEM_PROMPT = `You are MakeDo's recipe assistant. MakeDo is an anti-consumption app — the user wants recipes built ONLY from what they already have. Do not suggest ingredients beyond their pantry plus the assumed-staples list below.
+
+The user has a pantry of items, each with a name, quantity, and unit. The user has also selected a meal category they want recipes for.
+
+Suggest EXACTLY 4 recipes. Every recipe must:
+- Match the requested meal category.
+- Use ONLY ingredients from the user's pantry plus the assumed staples list. Never reference any other ingredient.
+- Try to use ingredient quantities that match the user's pantry units. For example, if the pantry says "rice — 2 lb", prefer "8 oz rice" over "1 cup rice". When you cannot match the pantry unit (e.g., "1 clove garlic" when the pantry has garlic in lb), use a natural recipe unit and emit unit as null.
+
+When referencing pantry items, use the exact name as it appears in the user's pantry list below. Do not paraphrase, shorten, or substitute. Use the assumed-staples names verbatim from the staples list above.
+
+Assumed staples (every kitchen has these — use freely without listing in pantry):
+Salt, Black pepper, Water, Neutral cooking oil, Garlic powder, Onion powder, Paprika, Chili flakes, Dried oregano, Dried basil, Dried thyme, Bay leaves
 
 Respond with valid JSON ONLY — no preamble, no markdown fences, no commentary. Match this exact shape:
 
@@ -41,8 +99,10 @@ Respond with valid JSON ONLY — no preamble, no markdown fences, no commentary.
     {
       "name": "string",
       "description": "one sentence",
-      "ingredients_used": [{ "name": "string matching a pantry item exactly", "quantity": 1 }],
-      "ingredients_needed": ["common staple they may not have"],
+      "category": "must match the requested category exactly",
+      "ingredients": [
+        { "name": "string matching a pantry item or an assumed staple exactly", "quantity": 1, "unit": "lb" | "oz" | "g" | "kg" | "fl_oz" | "cup" | "tbsp" | "tsp" | "ml" | "L" | "count" | null }
+      ],
       "steps": ["step 1", "step 2", "..."],
       "estimated_minutes": 30
     }
@@ -50,32 +110,34 @@ Respond with valid JSON ONLY — no preamble, no markdown fences, no commentary.
 }
 
 Rules:
-- Prefer recipes that use what they HAVE over recipes that need many additions.
-- ingredients_used names must match pantry item names exactly (case-sensitive).
-- ingredients_used.quantity represents how many UNITS of that pantry item the recipe will consume. It must NEVER exceed the user's available quantity. It SHOULD often be less — most recipes don't consume entire pantry items. A recipe using "half a medium onion" should set quantity to 1 (one onion item touched), not 2.
-- ingredients_needed must ONLY include items from this allowlist: oil, olive oil, salt, pepper, black pepper, water. Nothing else.
-- If a recipe would require an ingredient not in the pantry and not in the allowlist (e.g. garlic, butter, soy sauce, cinnamon, herbs), DO NOT suggest that recipe. Pick a different recipe that works without it.
-- Optional flourishes the user might enjoy if they happen to have them (e.g. "season with cinnamon if you have it") may be mentioned IN STEPS but never in ingredients_needed.
-- Embed precise measurements and counts in the steps themselves. EVERY step that uses a pantry ingredient must specify how much: "Slice half a medium onion," "Core and dice 1 apple," "Heat 2 tablespoons olive oil." Never write vague instructions like "slice the onions" or "add the apples" — always specify quantity. Use household measures (tablespoons, cups, pieces, halves) — the user does not have a kitchen scale.
-- Recipe portions should be reasonable for 1-2 servings unless context suggests otherwise. Don't write recipes that consume someone's entire week of inventory in one sitting.
+- Exactly 4 recipes per response. Not 3, not 5.
+- Every ingredient name must match either a pantry item name (case-insensitive) or an assumed staple. No exceptions.
+- Quantities are numbers. Unit is one of the allowed values or null.
 - Keep steps concise but complete — 4-8 steps typical.
-- Tone: warm, encouraging, never preachy.`;
+- Tone: warm, encouraging, never preachy.
+- Match the requested meal category. If the user asks for breakfast, every recipe is breakfast.`;
 
-type RecipeIngredientUsed = {
+type RecipeIngredient = {
   name: string;
   quantity: number;
+  unit: PantryUnit | null;
 };
 
-type Recipe = {
+type ValidatedRecipe = {
   name: string;
-  description: string;
-  ingredients_used: RecipeIngredientUsed[];
-  ingredients_needed: string[];
+  description: string | null;
+  category: RecipeCategory;
+  ingredients: RecipeIngredient[];
   steps: string[];
-  estimated_minutes: number;
+  estimated_minutes: number | null;
 };
 
-type PantryRow = { name: string; quantity: number };
+type PantryRow = {
+  name: string;
+  normalized_name: string;
+  quantity: number;
+  unit: string;
+};
 
 type AnthropicContentBlock = { type?: string; text?: unknown };
 type AnthropicResponse = { content?: AnthropicContentBlock[] };
@@ -104,50 +166,118 @@ const isString = (v: unknown): v is string => typeof v === 'string';
 const isNumber = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(v);
 
-const validateRecipes = (parsed: unknown): Recipe[] | null => {
-  if (!parsed || typeof parsed !== 'object') return null;
-  const maybe = (parsed as { recipes?: unknown }).recipes;
-  if (!Array.isArray(maybe) || maybe.length === 0) return null;
+const isRecipeCategory = (v: unknown): v is RecipeCategory =>
+  isString(v) && (RECIPE_CATEGORIES as readonly string[]).includes(v);
 
-  const out: Recipe[] = [];
-  for (const raw of maybe) {
-    if (!raw || typeof raw !== 'object') return null;
-    const r = raw as Record<string, unknown>;
-    if (!isString(r.name) || !isString(r.description)) return null;
-    if (!Array.isArray(r.ingredients_used)) return null;
-    if (!Array.isArray(r.ingredients_needed)) return null;
-    if (!Array.isArray(r.steps)) return null;
-    if (!isNumber(r.estimated_minutes)) return null;
+const isPantryUnit = (v: unknown): v is PantryUnit =>
+  isString(v) && (PANTRY_UNITS as readonly string[]).includes(v);
 
-    const used: RecipeIngredientUsed[] = [];
-    for (const u of r.ingredients_used) {
-      if (!u || typeof u !== 'object') return null;
-      const ur = u as Record<string, unknown>;
-      if (!isString(ur.name) || !isNumber(ur.quantity)) return null;
-      used.push({ name: ur.name, quantity: ur.quantity });
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+// Strict, case-insensitive, trimmed equality for ingredient name matching.
+// `pantryNormalized` is the set of pantry rows' `normalized_name` values.
+// `staplesNormalized` is ASSUMED_STAPLES lowercased+trimmed.
+const ingredientMatches = (
+  rawName: string,
+  pantryNormalized: Set<string>,
+  staplesNormalized: Set<string>,
+): boolean => {
+  const candidate = rawName.trim().toLowerCase();
+  if (candidate.length === 0) return false;
+  return pantryNormalized.has(candidate) || staplesNormalized.has(candidate);
+};
+
+// Validate a single LLM-emitted recipe against the requested category and
+// the matchable-ingredient sets. Returns the validated recipe, or null if it
+// should be dropped.
+const validateRecipe = (
+  raw: unknown,
+  requestedCategory: RecipeCategory,
+  pantryNormalized: Set<string>,
+  staplesNormalized: Set<string>,
+): ValidatedRecipe | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+
+  if (!isString(r.name) || r.name.trim().length === 0) return null;
+  if (!isRecipeCategory(r.category)) return null;
+  if (r.category !== requestedCategory) return null;
+  if (!Array.isArray(r.ingredients)) return null;
+  if (!Array.isArray(r.steps)) return null;
+
+  // description and estimated_minutes are nullable in the persisted shape.
+  const description = isString(r.description) ? r.description : null;
+  const estimatedMinutes = isNumber(r.estimated_minutes)
+    ? r.estimated_minutes
+    : null;
+
+  const steps: string[] = [];
+  for (const s of r.steps) {
+    if (!isString(s)) return null;
+    steps.push(s);
+  }
+
+  const ingredients: RecipeIngredient[] = [];
+  for (const item of r.ingredients) {
+    if (!item || typeof item !== 'object') return null;
+    const ing = item as Record<string, unknown>;
+    if (!isString(ing.name) || ing.name.trim().length === 0) return null;
+    if (!isNumber(ing.quantity)) return null;
+
+    // Server-side scrubbing — drop the whole recipe if any ingredient name
+    // doesn't strictly match a pantry item or assumed staple.
+    if (!ingredientMatches(ing.name, pantryNormalized, staplesNormalized)) {
+      return null;
     }
 
-    const needed: string[] = [];
-    for (const n of r.ingredients_needed) {
-      if (!isString(n)) return null;
-      needed.push(n);
-    }
+    // Coerce invalid units to null instead of dropping the recipe.
+    const unit: PantryUnit | null =
+      ing.unit === null || ing.unit === undefined
+        ? null
+        : isPantryUnit(ing.unit)
+          ? ing.unit
+          : null;
 
-    const steps: string[] = [];
-    for (const s of r.steps) {
-      if (!isString(s)) return null;
-      steps.push(s);
-    }
-
-    out.push({
-      name: r.name,
-      description: r.description,
-      ingredients_used: used,
-      ingredients_needed: needed,
-      steps,
-      estimated_minutes: r.estimated_minutes,
+    ingredients.push({
+      name: ing.name,
+      quantity: ing.quantity,
+      unit,
     });
   }
+
+  return {
+    name: r.name,
+    description,
+    category: r.category,
+    ingredients,
+    steps,
+    estimated_minutes: estimatedMinutes,
+  };
+};
+
+const validateRecipes = (
+  parsed: unknown,
+  requestedCategory: RecipeCategory,
+  pantryNormalized: Set<string>,
+  staplesNormalized: Set<string>,
+): ValidatedRecipe[] | null => {
+  if (!parsed || typeof parsed !== 'object') return null;
+  const maybe = (parsed as { recipes?: unknown }).recipes;
+  if (!Array.isArray(maybe)) return null;
+  if (maybe.length !== RECIPES_PER_GENERATION) return null;
+
+  const out: ValidatedRecipe[] = [];
+  for (const raw of maybe) {
+    const validated = validateRecipe(
+      raw,
+      requestedCategory,
+      pantryNormalized,
+      staplesNormalized,
+    );
+    if (validated) out.push(validated);
+  }
+  if (out.length < RECIPES_PER_GENERATION) return null;
   return out;
 };
 
@@ -159,6 +289,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   if (req.method !== 'POST') {
     return json(405, { error: 'Method not allowed' });
+  }
+
+  // Parse body for category.
+  let requestedCategory: RecipeCategory;
+  try {
+    const body = (await req.json()) as { category?: unknown };
+    if (!isRecipeCategory(body?.category)) {
+      return json(400, { error: 'Invalid or missing category.' });
+    }
+    requestedCategory = body.category;
+  } catch {
+    return json(400, { error: 'Invalid or missing category.' });
   }
 
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
@@ -218,12 +360,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json(500, { error: 'Could not check your daily limit. Try again.' });
   }
 
-  // Pantry fetch (RLS scoped).
+  // Pantry fetch (RLS scoped). Phase 2: include unit + normalized_name so the
+  // LLM can match units and the server-side scrubber can verify names.
   let pantry: PantryRow[];
   try {
     const { data, error } = await supabase
       .from('pantry_items')
-      .select('name, quantity')
+      .select('name, normalized_name, quantity, unit')
       .gt('quantity', 0);
     if (error) {
       console.error('pantry fetch failed', error);
@@ -235,13 +378,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json(500, { error: 'Could not load your pantry. Try again.' });
   }
 
-  if (pantry.length === 0) {
-    return json(400, { error: 'Add some items to your pantry first.' });
+  if (pantry.length < MIN_PANTRY_ITEMS) {
+    return json(400, { error: 'Add a few more items to get recipe ideas.' });
   }
 
-  const userPrompt = `Here is the user's pantry. Suggest recipes:
+  // Build the matchable-name sets for the scrubber.
+  const pantryNormalized = new Set(
+    pantry.map((row) => row.normalized_name.trim().toLowerCase()),
+  );
+  const staplesNormalized = new Set(
+    ASSUMED_STAPLES.map((name) => name.trim().toLowerCase()),
+  );
 
-${JSON.stringify({ pantry })}`;
+  const userPrompt = `Requested category: ${requestedCategory}
+
+The user's pantry:
+${JSON.stringify(pantry)}
+
+Suggest 4 recipes for the ${requestedCategory} category, using only the pantry plus assumed staples.`;
 
   // Anthropic call. Never leak provider error details client-side.
   let anthropicBody: AnthropicResponse;
@@ -290,12 +444,56 @@ ${JSON.stringify({ pantry })}`;
     });
   }
 
-  const recipes = validateRecipes(parsed);
+  const recipes = validateRecipes(
+    parsed,
+    requestedCategory,
+    pantryNormalized,
+    staplesNormalized,
+  );
   if (!recipes) {
     console.error('LLM output failed validation', parsed);
     return json(502, {
       error: 'Could not understand the recipe response. Please try again.',
     });
+  }
+
+  // Persist recipes — single batch insert, retry once on failure with brief
+  // delay. Rely on column defaults for `id`, `user_id`, `created_at`,
+  // `expires_at`, `is_favorite`. RLS ensures rows belong to the caller.
+  const insertRows = recipes.map((r) => ({
+    name: r.name,
+    description: r.description,
+    category: r.category,
+    ingredients: r.ingredients,
+    steps: r.steps,
+    estimated_minutes: r.estimated_minutes,
+  }));
+
+  const tryInsert = async (): Promise<{ data: unknown; error: unknown }> => {
+    try {
+      const result = await supabase.from('recipes').insert(insertRows).select('*');
+      return { data: result.data, error: result.error };
+    } catch (err) {
+      return { data: null, error: err };
+    }
+  };
+
+  let inserted: unknown;
+  const first = await tryInsert();
+  if (first.error || !Array.isArray(first.data)) {
+    console.error('recipes insert attempt 1 failed', first.error);
+    await sleep(INSERT_RETRY_DELAY_MS);
+    const second = await tryInsert();
+    if (second.error || !Array.isArray(second.data)) {
+      console.error('recipes insert attempt 2 failed', second.error);
+      // Do NOT log to ai_generations — refund the user's credit.
+      return json(500, {
+        error: 'Saved recipes failed to persist. Please try again.',
+      });
+    }
+    inserted = second.data;
+  } else {
+    inserted = first.data;
   }
 
   // Log the generation. Don't fail the request on log error.
@@ -310,5 +508,5 @@ ${JSON.stringify({ pantry })}`;
     console.error('ai_generations insert threw', err, 'user', userId);
   }
 
-  return json(200, { recipes });
+  return json(200, { recipes: inserted });
 });

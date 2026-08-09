@@ -1,24 +1,24 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import React from 'react';
 
-import type { RecipeSuggestion } from '@/types/recipe';
+import type { Recipe, RecipeCategory } from '@/types/recipe';
 
 import RecipeDetailScreen from './recipe-detail';
 
 type RecipeActions = {
-  fetchRecipes: jest.Mock<Promise<void>, []>;
+  fetchRecipes: jest.Mock<Promise<void>, [RecipeCategory]>;
   clearRecipes: jest.Mock<void, []>;
 };
 
 type RecipeState = RecipeActions & {
-  recipes: RecipeSuggestion[];
+  recipes: Recipe[];
   loading: boolean;
   error: string | null;
   lastFetchedAt: string | null;
 };
 
 const mockRecipeActions: RecipeActions = {
-  fetchRecipes: jest.fn<Promise<void>, []>(),
+  fetchRecipes: jest.fn<Promise<void>, [RecipeCategory]>(),
   clearRecipes: jest.fn<void, []>(),
 };
 
@@ -43,8 +43,6 @@ let mockParams: { recipeIndex?: string } = {};
 const mockReplace = jest.fn();
 
 jest.mock('expo-router', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const ReactActual = jest.requireActual<typeof import('react')>('react');
   const StackScreen = () => null;
   const Stack = { Screen: StackScreen };
   return {
@@ -55,19 +53,26 @@ jest.mock('expo-router', () => {
       replace: mockReplace,
       back: jest.fn(),
     }),
-    // Avoid unused-import lint complaints inside the mock factory.
     __esModule: true,
-    _react: ReactActual,
   };
 });
 
-const fakeRecipe = (overrides: Partial<RecipeSuggestion> = {}): RecipeSuggestion => ({
+const fakeRecipe = (overrides: Partial<Recipe> = {}): Recipe => ({
+  id: 'r-1',
+  user_id: 'user-1',
   name: 'Garlic Pasta',
   description: 'A quick weeknight dinner.',
-  ingredients_used: [{ name: 'Onions', quantity: 1 }],
-  ingredients_needed: ['Olive oil'],
+  category: 'dinner',
+  ingredients: [
+    { name: 'Onions', quantity: 1, unit: 'count' },
+    { name: 'Rice', quantity: 8, unit: 'oz' },
+    { name: 'Salt', quantity: 1, unit: null },
+  ],
   steps: ['Boil pasta.', 'Sauté onion.', 'Combine.'],
   estimated_minutes: 20,
+  is_favorite: false,
+  created_at: '2026-01-01T00:00:00.000Z',
+  expires_at: '2026-01-15T00:00:00.000Z',
   ...overrides,
 });
 
@@ -91,8 +96,8 @@ describe('RecipeDetailScreen', () => {
   it('renders the selected recipe when recipeIndex is valid', () => {
     setRecipeState({
       recipes: [
-        fakeRecipe({ name: 'Garlic Pasta' }),
-        fakeRecipe({ name: 'Onion Soup', description: 'Cozy.' }),
+        fakeRecipe({ id: 'a', name: 'Garlic Pasta' }),
+        fakeRecipe({ id: 'b', name: 'Onion Soup', description: 'Cozy.' }),
       ],
     });
     mockParams = { recipeIndex: '1' };
@@ -101,9 +106,29 @@ describe('RecipeDetailScreen', () => {
 
     expect(screen.getByText('Onion Soup')).toBeTruthy();
     expect(screen.getByText('Cozy.')).toBeTruthy();
-    expect(screen.getByText('From your pantry')).toBeTruthy();
-    expect(screen.getByText("You'll also need")).toBeTruthy();
+    expect(screen.getByText('Ingredients')).toBeTruthy();
     expect(screen.getByText('Steps')).toBeTruthy();
+  });
+
+  it('renders ingredients as "{quantity} {unit} {name}" and omits unit when null', () => {
+    setRecipeState({ recipes: [fakeRecipe({ id: 'a' })] });
+    mockParams = { recipeIndex: '0' };
+
+    render(<RecipeDetailScreen />);
+
+    expect(screen.getByText('1 count Onions')).toBeTruthy();
+    expect(screen.getByText('8 oz Rice')).toBeTruthy();
+    expect(screen.getByText('1 Salt')).toBeTruthy();
+  });
+
+  it('does NOT render legacy "From your pantry" or "You\'ll also need" sections', () => {
+    setRecipeState({ recipes: [fakeRecipe({ id: 'a' })] });
+    mockParams = { recipeIndex: '0' };
+
+    render(<RecipeDetailScreen />);
+
+    expect(screen.queryByText('From your pantry')).toBeNull();
+    expect(screen.queryByText("You'll also need")).toBeNull();
   });
 
   it('renders the fallback when recipeIndex is out of bounds', () => {
